@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+venv38/
+
+# Build & Dist (용량이 커서 깃허브엔 안 올립니다)
+build/
+dist/
+*.spec
+
+# User Data (사원님의 개인 기록이 담긴 파일들)
+assets/data/user_history.json
+config/app_settings.json
+
+# Input/Output (테스트용 PDF들)
+watch_input/*
+processed_pdf/*
+!watch_input/.gitkeep
