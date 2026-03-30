@@ -1,6 +1,5 @@
-import sys
-import json
 import os
+import json
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, 
     QButtonGroup, QSpinBox, QPushButton, QCheckBox, QGroupBox, 
@@ -36,20 +35,19 @@ class InputDialog(QDialog):
             print(f"히스토리 저장 실패: {e}")
 
     action_triggered = pyqtSignal(str, dict, object)
+    save_requested = pyqtSignal(dict)
 
     def __init__(self, file_name, config, parent=None):
         super().__init__(parent)
         InputDialog.load_history()
-        
         self.file_name = file_name
         self.config = config
+        self.pdf_path = "" # main.py에서 전달받을 수 있도록 준비 (파일 체크용)
         self.part_name = config.get('name', '알 수 없는 부품')
-        
-        # [해결] main.py에서 참조하는 변수 선언
         self.result_data = {} 
         
-        # [설정] 창을 항상 위로 & 자동 포커스
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        # [수정] 한 번만 위로 띄우기 (고정 해제)
+        self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint)
         
         self.init_ui()
         self.raise_()
@@ -57,15 +55,16 @@ class InputDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("🛠️ AZtech 작업 콘솔")
-        # 요청하신 대로 세로 길이를 950으로 더 확장했습니다.
         self.setFixedSize(800, 950) 
-        
         self.main_layout = QVBoxLayout(self)
         self.stack = QStackedWidget()
         self.main_layout.addWidget(self.stack)
         
+        # 페이지 1: 호기 설정
         self.setup_page_input()
+        # 페이지 2: 결과 확인 및 작업
         self.setup_page_action()
+        
         self.stack.setCurrentIndex(0)
 
     def setup_page_input(self):
@@ -145,41 +144,79 @@ class InputDialog(QDialog):
         self.action_page = QWidget()
         layout = QVBoxLayout(self.action_page)
         
-        # [확장] 디버깅 로그 길이 확장 (350으로 더 키웠습니다)
-        layout.addWidget(QLabel("<b>🔍 실시간 분석 로그 (NG 판정 근거):</b>"))
+        # 1. 상단 분석 로그 (고정 높이)
+        layout.addWidget(QLabel("<b>🔍 실시간 분석 로그 (모든 호기 합계):</b>"))
         self.debug_log = QTextEdit()
         self.debug_log.setReadOnly(True)
-        self.debug_log.setFixedHeight(350) 
+        self.debug_log.setFixedHeight(250) 
         self.debug_log.setStyleSheet("background-color: #2c3e50; color: #ecf0f1; font-family: Consolas; font-size: 10pt; padding: 10px;")
         layout.addWidget(self.debug_log)
 
-        # [스크롤] 내용이 길어져도 버튼이 안 잘리게 스크롤 영역 사용
+        # 2. 중앙 스크롤 영역 (유동적 길이의 핵심)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll_content = QWidget()
-        self.scroll_layout = QVBoxLayout(scroll_content)
+        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         
-        self.preview_container = QVBoxLayout()
-        self.scroll_layout.addLayout(self.preview_container)
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: transparent;")
+        
+        # ⭐ 핵심: 위젯들이 위에서부터 차곡차곡 쌓이게 Alignment 설정
+        self.scroll_main_layout = QVBoxLayout(scroll_content)
+        self.scroll_main_layout.setAlignment(Qt.AlignTop) 
+        self.scroll_main_layout.setContentsMargins(10, 10, 10, 10)
+        self.scroll_main_layout.setSpacing(15) # 카드 사이 간격
 
-        self.dyn_layout = QVBoxLayout()
-        self.scroll_layout.addLayout(self.dyn_layout)
+        # 💡 여기가 에러의 원인이었던 부분! 이름을 하나로 통일합니다.
+        self.content_layout = self.scroll_main_layout 
         
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
 
-        self.btn_done = QPushButton("💾 작업 데이터 저장 및 종료")
-        self.btn_done.setFixedHeight(55)
-        self.btn_done.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
-        self.btn_done.clicked.connect(self.final_accept)
-        layout.addWidget(self.btn_done)
+        # 3. 하단 버튼 (저장/종료) - 기존 유지
+        btn_row = QHBoxLayout()
+        self.btn_save = QPushButton("💾 데이터 분류 저장")
+        self.btn_save.setFixedHeight(55)
+        self.btn_save.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
+        self.btn_save.clicked.connect(self.request_save)
+        
+        self.btn_close = QPushButton("❌ 작업 종료 (창 닫기)")
+        self.btn_close.setFixedHeight(55)
+        self.btn_close.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
+        self.btn_close.clicked.connect(self.accept)
+        
+        btn_row.addWidget(self.btn_save)
+        btn_row.addWidget(self.btn_close)
+        layout.addLayout(btn_row)
 
         btn_back = QPushButton("⬅️ 정보 수정으로 돌아가기")
+        btn_back.setFixedHeight(35)
         btn_back.clicked.connect(lambda: self.stack.setCurrentIndex(0))
         layout.addWidget(btn_back)
 
         self.stack.addWidget(self.action_page)
+
+    def request_save(self):
+        """저장 로직: PDF 점유 체크 후 신호 발생"""
+        if self.full_pdf_path and os.path.exists(self.full_pdf_path):
+            try:
+                # 파일에 쓰기 모드 접근을 시도하여 열려있는지 확인
+                with open(self.full_pdf_path, 'a') as f:
+                    pass 
+            except IOError:
+                QMessageBox.critical(self, "파일 접근 오류", 
+                                   f"⚠️ 현재 '{self.file_name}' 파일이 다른 프로그램에서 열려 있습니다.\n\n"
+                                   "PDF 뷰어를 종료한 뒤 다시 [저장] 버튼을 눌러주세요!")
+                return
+
+        # 점유 문제가 없으면 저장 진행
+        InputDialog.save_history()
+        data = self.update_and_get_data()
+        self.save_requested.emit(data)
+        
+        # 시각적 피드백
+        self.btn_save.setText("✅ 저장 완료")
+        self.btn_save.setEnabled(False)
+        self.btn_save.setStyleSheet("background-color: #95a5a6; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
 
     def update_and_get_data(self):
         current_site = "신관" if self.radio_new.isChecked() else "본관"
@@ -199,20 +236,55 @@ class InputDialog(QDialog):
         return self.result_data
 
     def go_to_action_page(self):
-        data = self.update_and_get_data()
-        
-        while self.dyn_layout.count():
-            item = self.dyn_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
 
+        # 1. 입력 검증 로직 (기존 유지)
+        current_machines = [s.value() for s in self.machine_spins if s.value() > 0]
+        if not current_machines:
+            QMessageBox.warning(self, "입력 오류", "⚠️ 최소 하나 이상의 호기 번호(1~35)를 입력해야 합니다.")
+            return
+        if len(current_machines) != len(set(current_machines)):
+            QMessageBox.warning(self, "입력 오류", "⚠️ 중복된 호기 번호가 있습니다.")
+            return
+
+        # 2. 데이터 업데이트 및 기존 UI 비우기
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+            elif item.layout(): # 레이아웃인 경우 내부 위젯까지 삭제
+                while item.layout().count():
+                    sub_item = item.layout().takeAt(0)
+                    if sub_item.widget(): sub_item.widget().deleteLater()
+
+        data = self.update_and_get_data()
+        self.action_triggered.emit("preview", data, "ALL")
+
+        # 3. 호기별 작업 버튼 생성 로직 (기존 유지)
         mappings = self.config.get('excel_mapping', [])
         num_parts = len(data['machines'])
 
         for p_idx, m_no in enumerate(data['machines']):
-            label = QLabel(f"<b>[ {m_no}호기 작업 ]</b>")
-            label.setStyleSheet("margin-top: 10px; color: #34495e;")
-            self.dyn_layout.addWidget(label)
+            unit_frame = QFrame()
+            unit_frame.setStyleSheet("""
+                QFrame { background-color: #fdfdfe; border: 1px solid #dcdde1; border-radius: 10px; margin-bottom: 10px; }
+                QLabel { border: none; color: #2c3e50; font-weight: bold; }
+            """)
+            unit_layout = QVBoxLayout(unit_frame)
+            unit_layout.setContentsMargins(15, 10, 15, 15)
+            unit_layout.setSpacing(8)
+
+            # 1. 제목 및 요약 멘트 박스
+            unit_layout.addWidget(QLabel(f"💬 {m_no}호기 요약:"))
+            
+            report_edit = QTextEdit()
+            report_edit.setReadOnly(True)
+            
+            # ⭐ 핵심: main.py에서 이 위젯을 찾기 위해 고유 이름을 부여합니다.
+            report_edit.setObjectName(f"report_edit_{p_idx}") 
+            
+            report_edit.setMinimumHeight(60) 
+            report_edit.setMaximumHeight(100)
+            report_edit.setStyleSheet("background-color: #ffffff; border: 1px solid #ebedef; padding: 5px;")
+            unit_layout.addWidget(report_edit)
             
             row = QHBoxLayout()
             
@@ -238,10 +310,11 @@ class InputDialog(QDialog):
             btn_ka.setStyleSheet("background-color: #f1c40f; color: black; font-weight: bold; border-radius: 5px;")
             btn_ka.clicked.connect(lambda chk, pi=p_idx, b=btn_ka: self.copy_with_feedback(pi, None, b, data, is_kakao=True))
             row.addWidget(btn_ka)
-            
-            self.dyn_layout.addLayout(row)
 
-        self.action_triggered.emit("preview", data, 0)
+            unit_layout.addLayout(row)
+            
+            self.content_layout.addWidget(unit_frame)
+
         self.stack.setCurrentIndex(1)
 
     def copy_with_feedback(self, p_idx, b_idx, btn, data, is_kakao=False):
@@ -269,5 +342,15 @@ class InputDialog(QDialog):
         ))
 
     def final_accept(self):
+        """저장 버튼 클릭 시 실행되는 함수"""
+        # 1. 히스토리 저장 (기존 로직)
         InputDialog.save_history()
+        
+        # 2. [추가] 최신 입력 데이터를 다시 한번 수집
+        data = self.update_and_get_data()
+        
+        # 3. [핵심] main.py의 execute_save_logic을 실행하라고 신호를 보냄!
+        self.save_requested.emit(data) 
+        
+        # 4. 이제 창을 닫습니다.
         self.accept()

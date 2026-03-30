@@ -8,8 +8,17 @@ from PyQt5.QtWidgets import (
     QApplication, QLabel, QTextEdit, QVBoxLayout, QWidget, QMessageBox
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
+# [.exe] 빌드 환경과 [.py] 실행 환경 모두를 지원하는 경로 설정
+if getattr(sys, 'frozen', False):
+    # .exe 실행 시: exe 파일이 있는 폴더
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # .py 실행 시: 현재 소스코드 폴더
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 시스템 경로 추가 (나머지 import들이 정상 작동하게 함)
+if BASE_DIR not in sys.path:
+    sys.path.append(BASE_DIR)
 
 from core.watcher import AZtechWatcher
 from core.detector import PartDetector
@@ -66,6 +75,7 @@ class AZtechApp(MainWindow):
         self.app_settings = self.load_settings()
 
         self.parser = self
+        self.is_processing = False
         
         self.watcher_thread = None
         self.btn_toggle_watch.clicked.disconnect()
@@ -96,7 +106,7 @@ class AZtechApp(MainWindow):
                 "센서바디 350바 1개": "", "센서바디 350바 2개": "", "센서바디 350바 3개": "",
                 "다이아 프램 정면": "", "다이아 프램 배면": "", 
                 "센서하우징 17.92": "", "센서하우징 19.25": "", "절곡형": "",
-                "캐리어 250바 작은 삼차원": "", "캐리어 250바 큰 삼차원": ""
+                "캐리어 250바 작은 삼차원": "", "캐리어 250바 큰 삼차원": "", "캐리어 350바 (일체형 캐리어)": ""
             }
         }
         
@@ -114,8 +124,11 @@ class AZtechApp(MainWindow):
     def save_settings(self):
         """현재 설정을 JSON 파일로 저장"""
         try:
-            # config 폴더가 없으면 생성
-            os.makedirs(os.path.dirname(self.CONFIG_FILE), exist_ok=True)
+            # ✅ 절대 경로로 저장되는지 다시 확인
+            save_dir = os.path.dirname(self.CONFIG_FILE)
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir, exist_ok=True)
+                
             with open(self.CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.app_settings, f, indent=4, ensure_ascii=False)
             return True
@@ -134,6 +147,34 @@ class AZtechApp(MainWindow):
             
             if self.watcher_thread and self.watcher_thread.isRunning():
                 self.add_log("⚠️ 감시 폴더 변경을 적용하려면 재시작하세요.")
+
+    def execute_save_logic(self, pdf_path, config, measurements, user_data, part_key):
+        """실제 파일을 이동하고 저장하는 로직"""
+        part_id = part_key 
+        part_display_name = config.get('name', part_id)
+        save_paths = self.app_settings.get('save_paths', {})
+
+        custom_save_path = save_paths.get(part_display_name) or save_paths.get(part_id, "")
+
+        if not custom_save_path or custom_save_path.strip() == "":
+            custom_save_path = PROCESSED_DIR
+            self.add_log(f"ℹ️ {part_display_name} 기본 폴더 사용.")
+        else:
+            custom_save_path = custom_save_path.strip()
+            self.add_log(f"📍 {part_display_name} 전용 경로: {custom_save_path}")
+
+        self.file_mgr.set_base_path(custom_save_path)
+        final_path = self.file_mgr.move_and_save(
+            pdf_path, config, measurements,
+            user_data['site'], user_data['machines'], user_data['timing'],
+            user_data['tool_changes'], mode='move'
+        )
+        if final_path: 
+            self.add_log(f"✅ 분류 저장 완료: {final_path}")
+            self.statusBar().showMessage(f"저장 성공: {os.path.basename(final_path)}", 3000)
+
+
+        self.file_mgr.set_base_path(PROCESSED_DIR)
 
     def toggle_engine(self):
         if self.watcher_thread and self.watcher_thread.isRunning():
@@ -173,21 +214,52 @@ class AZtechApp(MainWindow):
             self.statusBar().showMessage("감시 엔진 작동 중...")
 
     def process_new_file(self, pdf_path):
+        # 1. [방어] 이미 처리 중이거나, 파일이 이미 사라졌으면(이동되었으면) 중단
+        if hasattr(self, 'is_processing') and self.is_processing:
+            return
+        if not os.path.exists(pdf_path):
+            return
+            
+        self.is_processing = True 
         file_name = os.path.basename(pdf_path)
         self.add_log(f"📂 파일 감지: {file_name}")
 
         try:
-            part_key, config = self.detector.detect_config(pdf_path)
-            if not part_key: return
-
-            reader = PdfReader(pdf_path)
-            full_text = ""
-            for page in reader.pages:
-                full_text += page.extract_text() + "\n"
-                
-            measurements = parse_measurements(full_text, debug=False)
-            dialog = InputDialog(file_name, config, self)
+            from io import BytesIO
+            import pyperclip
             
+            # 파일 읽기
+            with open(pdf_path, 'rb') as f:
+                pdf_data = BytesIO(f.read())
+
+            # 제품 인식
+            res = self.detector.detect_config(pdf_path)
+            if not res or not res[0]:
+                self.add_log(f"⚠️ [인식 실패] {file_name}")
+                self.is_processing = False
+                return
+
+            part_key, config = res
+            self.add_log(f"✅ 인식 성공: {part_key}")
+
+            # PDF 데이터 추출 및 파싱
+            reader = PdfReader(pdf_data)
+            full_text = "".join([page.extract_text() + "\n" for page in reader.pages])
+            measurements = parse_measurements(full_text, debug=False)
+            self.add_log(f"📊 파싱 완료: {len(measurements)}개 항목 감지")
+
+            # 다이얼로그 생성
+            from PyQt5.QtCore import Qt
+            dialog = InputDialog(file_name, config, self)
+            dialog.full_pdf_path = os.path.abspath(pdf_path)
+            dialog.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint)
+
+            # 3. 그 아래에 있는 이 3줄이 "한 번만 위로 올리는" 역할을 합니다.
+            dialog.show()
+            dialog.raise_()           # 윈도우 계층 구조에서 위로 올림
+            dialog.activateWindow()    # 포커스를 이 창으로 가져옴
+
+            # --- [핵심: handle_action 로직 완성] ---
             def handle_action(action_type, data, info=None):
                 from modules.excel_copy import ExcelCopier
                 from modules.messenger import get_part_report
@@ -206,85 +278,94 @@ class AZtechApp(MainWindow):
                 elif action_type == "kakao":
                     p_idx = info
                     m_no = data['machines'][p_idx]
+                    # ✨ 카톡 리포트 생성 및 클립보드 복사
                     report, _ = get_part_report(data['site'], m_no, measurements, config, p_idx)
                     pyperclip.copy(report)
                     self.add_log(f"💬 [{m_no}호기] 카톡 보고서 복사 완료!")
                 
                 elif action_type == "preview":
-                    while dialog.preview_container.count():
-                        item = dialog.preview_container.takeAt(0)
-                        if item.widget(): item.widget().deleteLater()
-                        elif item.layout():
-                            while item.layout().count():
-                                child = item.layout().takeAt(0)
-                                if child.widget(): child.widget().deleteLater()
-
-                    all_parts_ms = measurements if isinstance(measurements[0], list) else [measurements]
+                    if getattr(self, '_is_previewing', False): return
+                    self._is_previewing = True
                     
-                    for p_idx in range(len(data['machines'])):
-                        m_no = data['machines'][p_idx]
-                        report, _ = get_part_report(data['site'], m_no, measurements, config, p_idx)
-                        lbl = QLabel(f"<b>💬 {m_no}호기:</b>")
-                        p_edit = QTextEdit()
-                        p_edit.setReadOnly(True)
-                        p_edit.setPlainText(report)
-                        p_edit.setFixedHeight(65) # 시원하게 65로 소폭 조정
-                        p_edit.setStyleSheet("background-color: #ffffff; border: 1px solid #dcdde1; font-size: 9pt;")
-                        dialog.preview_container.addWidget(lbl)
-                        dialog.preview_container.addWidget(p_edit)
+                    # 💡 1. 실행될 함수 정의 (모든 로직이 이 안에 있어야 함)
+                    def run_preview_update():
+                        try:
+                            machines = data.get('machines', [])
+                            print(f"\n[DEBUG] 타이머 실행 - 대상 호기: {machines}")
+                            
+                            full_debug_text = ""
+                            ranges = config.get("data_ranges", [])
+                            from PyQt5.QtWidgets import QTextEdit
 
-                    curr_p_idx = info if (info is not None and isinstance(info, int)) else 0
-                    if curr_p_idx >= len(all_parts_ms): curr_p_idx = 0
-                    m_no = data['machines'][curr_p_idx] if data['machines'] else "?"
-                    target_ms = all_parts_ms[curr_p_idx]
-                    debug_text = f"--- [{m_no}호기] 이상 항목(NG/UP/UN) 리스트 ---\n"
-                    bad_items_found = False
-                    for i, m in enumerate(target_ms):
-                        status = m.classify().upper()
-                        if status in ["NG", "UP", "UN"]:
-                            bad_items_found = True
-                            
-                            # 💡 [수정] 속성이 있는지 확인하며 안전하게 값 추출
-                            av = to_f3(getattr(m, 'actual_value', 0.0))
-                            ut = to_f3(getattr(m, 'ut', 0.0))
-                            lt = to_f3(getattr(m, 'lt', 0.0))
-                            
-                            # nv가 없으면 dv를 시도하고, 둘 다 없으면 "0.000"
-                            nv_val = getattr(m, 'nv', getattr(m, 'dv', 0.0))
-                            nv = to_f3(nv_val)
-                            
-                            display_name = f"[{m.cat}] {m.name}"
-                            if len(display_name) > 25: display_name = display_name[:22] + "..."
-                            debug_text += f"❌ {i:02d} | {status} | {display_name}\n"
-                            if hasattr(m, 'nv'): debug_text += f"   ㄴ 값:{av} (기준:{nv} / {lt}~{ut})\n"
-                            else: debug_text += f"   ㄴ 값:{av} (공차:{to_f3(m.to)})\n"
-                            debug_text += "-" * 35 + "\n"
-                    if not bad_items_found: debug_text += "✅ 모든 측정 항목이 정상(OK)입니다!\n"
-                    dialog.debug_log.setPlainText(debug_text)
+                            for p_idx, m_no in enumerate(machines):
+                                # (1) 리포트 생성
+                                try:
+                                    report, _ = get_part_report(data['site'], m_no, measurements, config, p_idx)
+                                except Exception as e:
+                                    report = f"리포트 생성 실패 ({m_no}호기)"
+                                    print(f"[ERROR] {m_no}호기 리포트 생성 에러: {e}")
 
+                                # (2) UI 위젯 찾기
+                                target_name = f"report_edit_{p_idx}"
+                                p_edit = dialog.findChild(QTextEdit, target_name)
+                                
+                                if p_edit:
+                                    p_edit.setPlainText(report)
+                                    print(f"   ㄴ [SUCCESS] {target_name} 주입 완료")
+                                else:
+                                    print(f"   ㄴ [FAIL] {target_name} 위젯을 여전히 찾을 수 없음")
+
+                                # (3) 하단 상세 로그 누적
+                                full_debug_text += f"=========== [{m_no}호기] 상세 이상 항목 ===========\n"
+                                if p_idx < len(ranges):
+                                    start, end = ranges[p_idx]
+                                    part_ms = measurements[start : end + 1]
+                                    any_issue = False
+                                    for j, m in enumerate(part_ms):
+                                        abs_idx = start + j
+                                        status = m.classify().upper() if hasattr(m, 'classify') else "UNKNOWN"
+                                        if status in ["NG", "UN", "UP"]:
+                                            any_issue = True
+                                            icon = {"NG": "🔴 [NG]", "UN": "🟡 [UN]", "UP": "🟠 [UP]"}.get(status, "⚪")
+                                            av = to_f3(getattr(m, 'actual_value', 0.0))
+                                            nv = to_f3(getattr(m, 'nv', 0.0))
+                                            full_debug_text += f"{icon} No.{abs_idx:02d} | {m.name}\n"
+                                            full_debug_text += f"      ㄴ 측정:{av} (기준:{nv})\n"
+                                    if not any_issue: full_debug_text += "✅ 이상 항목 없음\n"
+                                else: full_debug_text += "⚠️ 범위 설정 없음\n"
+                                full_debug_text += "-" * 45 + "\n\n"
+
+                            # (4) 하단 통합 로그창 업데이트
+                            dialog.debug_log.setPlainText(full_debug_text)
+                            
+                        except Exception as preview_e:
+                            print(f"[ERROR] 프리뷰 내부 실행 에러: {preview_e}")
+                        finally:
+                            # 💡 함수 종료 시 플래그 해제 (매우 중요)
+                            self._is_previewing = False
+
+                    # 💡 2. 정의한 함수를 0.15초 뒤에 실행하도록 예약
+                    from PyQt5.QtCore import QTimer
+                    QTimer.singleShot(150, run_preview_update)
+
+            # --- [시그널 연결 및 다이얼로그 실행] ---
             dialog.action_triggered.connect(handle_action)
+            dialog.save_requested.connect(lambda d: self.execute_save_logic(pdf_path, config, measurements, d, part_key))
 
-            if dialog.exec():
-                user_data = dialog.result_data
-                
-                # 💡 [핵심] 프로그램 종류에 맞는 개별 저장 경로 가져오기
-                custom_save_path = self.app_settings['save_paths'].get(part_key, PROCESSED_DIR)
-                self.file_mgr.set_base_path(custom_save_path) # 임시로 저장 경로 변경
-                
-                final_path = self.file_mgr.move_and_save(
-                    pdf_path, config, measurements,
-                    user_data['site'], user_data['machines'], user_data['timing'],
-                    user_data['tool_changes'], mode='move'
-                )
-                if final_path: self.add_log(f"✅ 작업 완료: {final_path}")
-                
-                # 다음 파일을 위해 기본 경로로 복구 (필요시)
-                self.file_mgr.set_base_path(PROCESSED_DIR)
+            dialog.exec_() # show() 대신 exec_()로 실행하여 모달로 띄움
 
         except Exception as e:
             self.add_log(f"🔥 에러: {str(e)}")
             import traceback
-            print(traceback.format_exc())
+            self.add_log(traceback.format_exc())
+        finally:
+            # 🔄 창이 닫히면 감시 엔진 재개
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(500, self._set_processing_false)
+            
+    def _set_processing_false(self):
+        self.is_processing = False
+        self.add_log("🔄 감시 엔진 재개")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

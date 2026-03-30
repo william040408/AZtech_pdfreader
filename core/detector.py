@@ -42,20 +42,24 @@ class PartDetector:
                 print(f"⚠️ [WARN] PDF에서 측정 항목을 찾지 못했습니다: {pdf_path}")
                 return None, None
 
-            # 3. 레지스트리와 100% 일치 비교 (Strict Match)
+            clean_extracted = [name.replace(" ", "") for name in extracted_names]
+
             best_match_key = None
             max_ratio = 0.0
 
             for part_key, config in self.registry.items():
                 json_sig = config.get("signature", [])
                 
-                # 순서, 내용, 개수가 완벽히 일치해야 함
-                if extracted_names == json_sig:
+                # JSON에 등록된 signature도 공백을 제거해서 준비
+                clean_json_sig = [name.replace(" ", "") for name in json_sig]
+                
+                # 3. 공백 제거 후 100% 일치 비교 (Lenient Match)
+                if clean_extracted == clean_json_sig:
+                    # 매칭 성공 시 실제 원본 데이터와 설정값 반환
                     return part_key, config
                 
-                # 일치하지 않을 경우, 디버깅을 위해 유사도 계산
-                # (가장 가까운 부품이 무엇인지 찾아내기 위함)
-                ratio = difflib.SequenceMatcher(None, extracted_names, json_sig).ratio()
+                # 일치하지 않을 경우, 디버깅을 위한 유사도 계산 (공백 제거 버전 기준)
+                ratio = difflib.SequenceMatcher(None, clean_extracted, clean_json_sig).ratio()
                 if ratio > max_ratio:
                     max_ratio = ratio
                     best_match_key = part_key

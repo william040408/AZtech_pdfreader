@@ -61,7 +61,7 @@ class NominalMeasurement(Measurement):
         if self.dv > self.ut or self.dv < self.lt:
             return "NG"
         
-        MARGIN_LIMIT = 0.005 
+        MARGIN_LIMIT = 0.003
         RATIO_LIMIT = 0.85
 
         if self.ut > 0:

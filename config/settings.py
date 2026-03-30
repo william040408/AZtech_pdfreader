@@ -7,43 +7,45 @@ import sys
 # =========================================================
 
 if getattr(sys, 'frozen', False):
-    # .exe 파일로 빌드되어 실행 중인 경우
     BASE_DIR = os.path.dirname(sys.executable)
 else:
-    # .py 소스 코드로 실행 중인 경우 (AZtech 폴더 기준)
-    # 현재 파일 위치(config/settings.py)에서 두 단계 상위로 이동
+    # config/ 폴더 안에 있으므로 두 번 올라가서 AZtech 루트 폴더를 잡음
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # =========================================================
 # 2. 고정 디렉토리 경로
 # =========================================================
 
-# 감시 및 결과 폴더
+# 2. 디렉토리 경로 설정
 WATCH_INPUT_DIR = os.path.join(BASE_DIR, "watch_input")
 PROCESSED_DIR = os.path.join(BASE_DIR, "processed_output")
-FAIL_DIR = os.path.join(BASE_DIR, "fail_output") # 분석 실패 시 이동할 곳 (추천)
+FAIL_DIR = os.path.join(BASE_DIR, "fail_output")
 
-# 자산 및 설정 파일 경로
+# 자산 폴더 (읽기 전용 레시피북)
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 DATA_DIR = os.path.join(ASSETS_DIR, "data")
 REGISTRY_PATH = os.path.join(DATA_DIR, "parts_registry_v2.json")
-SETTINGS_FILE = os.path.join(DATA_DIR, "app_settings.json") # 설정값 저장 위치
+
+# 설정 폴더 (사용자 개별 설정 저장소 - 여기가 훨씬 안전합니다!)
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+SETTINGS_FILE = os.path.join(CONFIG_DIR, "app_settings.json")
 
 # =========================================================
 # 3. 사용자 설정값(JSON) 관리
 # =========================================================
 
+# 3. 사용자 설정값 기본값 (권한 문제가 없는 폴더 기준)
 DEFAULT_SETTINGS = {
-    "master_save_path": r"C:\CMM_RESULTS",
-    "big_cmm_temp": r"C:\TEMP\BIG_CMM",
-    "small_cmm_temp": r"C:\TEMP\SMALL_CMM",
+    "watch_dir": WATCH_INPUT_DIR,
+    "master_save_path": PROCESSED_DIR, # 기본은 내 폴더 안으로!
     "kakao_report_enabled": True,
-    "auto_move_processed": True  # 분석 후 파일 이동 여부
+    "auto_move_processed": True
 }
 
 def init_directories():
     """필요한 모든 폴더가 없으면 생성합니다."""
-    dirs = [WATCH_INPUT_DIR, PROCESSED_DIR, FAIL_DIR, DATA_DIR]
+    # CONFIG_DIR도 목록에 추가해야 합니다!
+    dirs = [WATCH_INPUT_DIR, PROCESSED_DIR, FAIL_DIR, DATA_DIR, CONFIG_DIR]
     for d in dirs:
         os.makedirs(d, exist_ok=True)
 
