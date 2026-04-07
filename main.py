@@ -328,7 +328,8 @@ class AZtechApp(MainWindow):
                                             any_issue = True
                                             icon = {"NG": "🔴 [NG]", "UN": "🟡 [UN]", "UP": "🟠 [UP]"}.get(status, "⚪")
                                             av = to_f3(getattr(m, 'actual_value', 0.0))
-                                            nv = to_f3(getattr(m, 'nv', 0.0))
+                                            val = getattr(m, 'standard_value', 0.0)
+                                            nv = to_f3(val() if callable(val) else val)
                                             full_debug_text += f"{icon} No.{abs_idx:02d} | {m.name}\n"
                                             full_debug_text += f"      ㄴ 측정:{av} (기준:{nv})\n"
                                     if not any_issue: full_debug_text += "✅ 이상 항목 없음\n"

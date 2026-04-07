@@ -7,13 +7,13 @@ def parse_measurements(text: str, excluded_keywords=None, debug=False):
     
     NOMINAL_CATS = ["위치", "직경", "거리"]
     TOLERANCE_CATS = ["동심도", "원주 흔들림", "축 흔들림", "진원도", "직각도", "평행도", "위치도", "평면도"]
-    REQUIRED_KEYS = ["NV", "UT", "LT", "TO", "DV", "AV", "YN", "ZN", "ZA", "XN", "XA", "YA", "ER"]
+    REQUIRED_KEYS = ["NV", "UT", "LT", "TO", "DV", "AV", "YN", "ZN", "ZA", "XN", "XA", "YA", "ER", "RL"]
     
     # 일반적인 단어 제외 리스트
     ELIMINATE_KEYS = [
         "벤딩피팅", "공정검사", "완료", "치수검사", "센서바디1", "센서바디2", "센서바디3", 
         "샘플트레이", "캐리어", "일체형", "체크포인트", "추가포인트", "태영", "센서바디", "센서 하우징",
-        "Carrier"
+        "Carrier","RL=", "측정 점에서"
     ]
     
     # --- [STEP 0] 전처리 (Cleaning) ---

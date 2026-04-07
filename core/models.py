@@ -55,6 +55,9 @@ class NominalMeasurement(Measurement):
     @property
     def actual_value(self) -> float:
         return self.nv + self.dv
+    
+    def standard_value(self) -> float:
+        return self.nv
 
     def classify(self) -> str:
         # 기존 로직 유지 (dv와 ut, lt 비교)
@@ -107,6 +110,9 @@ class ToleranceMeasurement(Measurement):
     @property
     def actual_value(self) -> float:
         return self.dv
+    
+    def standard_value(self) -> float:
+        return self.to
 
     def classify(self) -> str:
         if self.to <= 0:

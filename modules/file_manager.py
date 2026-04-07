@@ -85,6 +85,11 @@ class FileManager:
             if "센서하우징" in part_name:
                 size = "17.92" if "17.92" in part_name else "19.25"
                 return f"센서하우징 {m_no}-{timing}{combined_suffix} {size}.pdf"
+            
+            if "ACV" in part_name:
+                time_lst = ['초품', '중품', '종품']
+                return f"{time_lst[timing-1]}.pdf"
+
             else:
                 return f"{m_no}-{timing}{combined_suffix}.pdf"
 

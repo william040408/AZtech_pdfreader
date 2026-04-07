@@ -37,13 +37,13 @@ class SettingsDialog(QDialog):
             "센서바디 350바 1개", "센서바디 350바 2개", "센서바디 350바 3개",
             "다이아 프램 정면", "다이아 프램 배면", 
             "센서하우징 17.92", "센서하우징 19.25", "절곡형",
-            "캐리어 250바 작은 삼차원", "캐리어 250바 큰 삼차원", "캐리어 350바 (일체형 캐리어)"
+            "캐리어 250바 작은 삼차원", "캐리어 250바 큰 삼차원", "캐리어 350바 (일체형 캐리어)", "센서포트", "ACV"
         ]
         
         for prog in programs:
             p_layout = QHBoxLayout()
             p_label = QLabel(f"<b>{prog}</b>")
-            p_label.setFixedWidth(160)
+            p_label.setFixedWidth(220)
             
             # 경로가 없으면 '경로 미지정' 표시
             current_path = self.settings.get('save_paths', {}).get(prog, '')
