@@ -34,19 +34,23 @@ class FileManager:
         # 1. 센서바디 규칙 (멀티 부품 대응)
         if "센서바디" in part_name:
             machine_parts = []
+
+            from modules.messenger import parse_custom_indices
+
             for i, r in enumerate(ranges):
-                start, end = r
-                # ⚠️ 핵심 수정: measurements 리스트 범위를 벗어나지 않도록 체크
-                target_measurements = measurements[start : end + 1]
+                target_pattern = r if isinstance(r, list) else [r]
+                target_indices = parse_custom_indices(target_pattern)
                 
-                # ⚠️ 핵심 수정: m.is_ng 가 메서드인지 속성인지 확인 후 호출
-                # 윌리엄님의 Measurement 클래스 구조에 맞게 수정 (메서드라면 () 필요)
                 has_ng = False
-                for m in target_measurements:
+                for abs_idx in target_indices:
+                    if abs_idx >= len(measurements): 
+                        continue
+                    
+                    m = measurements[abs_idx]
                     try:
                         if callable(m.is_ng):
                             if m.is_ng(): has_ng = True; break
-                        elif m.is_ng: # 속성일 경우
+                        elif getattr(m, 'is_ng', False): # 속성일 경우
                             has_ng = True; break
                     except: continue
 
@@ -93,36 +97,36 @@ class FileManager:
             else:
                 return f"{m_no}-{timing}{combined_suffix}.pdf"
 
-    def move_and_save(self, temp_pdf_path: str, part_config: Dict, measurements: List, 
+    def move_and_save(self, pdf_path: str, part_config: Dict, measurements: List, 
                       site: str, machines: List[int], timing: int, 
                       tool_changes: List[bool], mode: str = 'copy'):
         
-        # 1. 파일명 생성 시도
-        try:
-            new_filename = self._generate_new_name(part_config, measurements, site, machines, timing, tool_changes)
-        except Exception as e:
-            print(f"❌ 파일명 생성 실패: {e}")
-            new_filename = f"ERROR_RENAME_{int(time.time())}.pdf"
+        # 실험용 코드
+        # raise ConnectionError("네트워크 드라이브(Z:)의 연결이 끊겼습니다.")
+        # raise PermissionError("테스트용 파일 열림 에러입니다.")
+        
+        # 1. 대상 폴더(네트워크 드라이브) 존재 여부 광속 체크
+        if not os.path.exists(self.base_path):
+            raise OSError(f"네트워크 드라이브({self.base_path}) 연결이 끊겼습니다.")
 
-        # 2. 경로 설정
+        # 2. 파일명 생성 및 폴더 생성
+        new_filename = self._generate_new_name(part_config, measurements, site, machines, timing, tool_changes)
         sub_folder = part_config.get("sub_folder", "기타")
         target_dir = os.path.join(self.base_path, sub_folder)
-        
-        # 3. 폴더 생성 (이미 있으면 무시)
         os.makedirs(target_dir, exist_ok=True)
-            
-        initial_target_path = os.path.join(target_dir, new_filename)
-        final_target_path = self._get_unique_path(initial_target_path)
+        
+        final_target_path = self._get_unique_path(os.path.join(target_dir, new_filename))
 
-        # 4. 파일 이동/복사 실행
+        # 3. 파일 이동 실행 (여기서 에러가 나면 그대로 위로 던짐)
         try:
             if mode == 'copy':
-                shutil.copy2(temp_pdf_path, final_target_path)
+                shutil.copy2(pdf_path, final_target_path)
             else:
-                shutil.move(temp_pdf_path, final_target_path)
-            
-            print(f"📁 [{mode.upper()} 성공] {final_target_path}")
+                shutil.move(pdf_path, final_target_path)
             return final_target_path
+        except PermissionError:
+            # 파일이 열려있어서 거부당한 경우
+            raise PermissionError(f"파일({os.path.basename(pdf_path)})이 열려있어 접근할 수 없습니다.")
         except Exception as e:
-            print(f"❌ 파일 조작 실패: {e}")
-            return None
+            # 기타 (용량 부족, 네트워크 단절 등)
+            raise OSError(f"파일 조작 중 오류 발생: {e}")

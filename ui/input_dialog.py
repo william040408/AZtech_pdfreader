@@ -3,7 +3,7 @@ import json
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton, 
     QButtonGroup, QSpinBox, QPushButton, QCheckBox, QGroupBox, 
-    QFrame, QStackedWidget, QWidget, QTextEdit, QMessageBox, QScrollArea
+    QFrame, QStackedWidget, QWidget, QTextEdit, QMessageBox, QScrollArea, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 
@@ -196,27 +196,49 @@ class InputDialog(QDialog):
         self.stack.addWidget(self.action_page)
 
     def request_save(self):
-        """저장 로직: PDF 점유 체크 후 신호 발생"""
+        """저장 버튼 클릭 시 호출"""
+        print(f"\n[DIALOG_LOG] --- 저장 요청 시작 ---")
+        
+        # 1. 파일 점유 체크
         if self.full_pdf_path and os.path.exists(self.full_pdf_path):
             try:
-                # 파일에 쓰기 모드 접근을 시도하여 열려있는지 확인
                 with open(self.full_pdf_path, 'a') as f:
                     pass 
+                print("[DIALOG_LOG] 1. 파일 점유 확인: 통과 (정상)")
             except IOError:
-                QMessageBox.critical(self, "파일 접근 오류", 
-                                   f"⚠️ 현재 '{self.file_name}' 파일이 다른 프로그램에서 열려 있습니다.\n\n"
-                                   "PDF 뷰어를 종료한 뒤 다시 [저장] 버튼을 눌러주세요!")
+                print("[DIALOG_LOG] 1. 파일 점유 확인: 실패 (사용 중)")
+                QMessageBox.critical(self, "파일 접근 오류", f"⚠️ '{self.file_name}' 파일이 열려 있습니다.")
                 return
 
-        # 점유 문제가 없으면 저장 진행
-        InputDialog.save_history()
-        data = self.update_and_get_data()
-        self.save_requested.emit(data)
-        
-        # 시각적 피드백
-        self.btn_save.setText("✅ 저장 완료")
+        print(f"[DIALOG_LOG] 3. 버튼 비활성화 및 시그널 전송 준비")
         self.btn_save.setEnabled(False)
-        self.btn_save.setStyleSheet("background-color: #95a5a6; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
+        self.btn_save.setText("⏳ 서버 저장 중...")
+        self.btn_save.setStyleSheet("background-color: #bdc3c7; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
+        QApplication.processEvents() # UI 강제 업데이트
+
+        # 3. 데이터 추출 및 검증
+        try:
+            data = self.update_and_get_data()
+            print(f"[DIALOG_LOG] 2. 데이터 추출 성공: {data}")
+            
+            # 💡 [수정 포인트] 데이터가 없으면 경고창 띄우고 버튼 다시 살려주기
+            if not data['site'] or not data['machines']:
+                print("[DIALOG_LOG] 2. 데이터 검증 실패: 필수값 누락")
+                QMessageBox.warning(self, "입력 누락", "위치 및 호기 설정을 확인해 주세요.")
+                self.btn_save.setEnabled(True)
+                self.btn_save.setText("💾 데이터 분류 저장")
+                self.btn_save.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
+                return 
+                
+        except Exception as e:
+            print(f"[DIALOG_LOG] 2. 데이터 추출 중 에러: {e}")
+            self.btn_save.setEnabled(True)
+            self.btn_save.setText("💾 데이터 분류 저장")
+            return
+
+        # 4. 모든 검증 통과 시 시그널 발생
+        self.save_requested.emit(data)
+        print(f"[DIALOG_LOG] --- 시그널 발생 완료 ---")
 
     def update_and_get_data(self):
         current_site = "신관" if self.radio_new.isChecked() else "본관"
@@ -341,16 +363,11 @@ class InputDialog(QDialog):
             btn.setStyleSheet(original_style)
         ))
 
-    def final_accept(self):
-        """저장 버튼 클릭 시 실행되는 함수"""
-        # 1. 히스토리 저장 (기존 로직)
-        InputDialog.save_history()
+    # 💡 [여기서부터 새로 추가/변경] 안 쓰는 final_accept는 지우고 아래 함수를 넣으세요!
+    def mark_as_saved(self):
+        """저장이 완료되었을 때 창을 끄지 않고 버튼 상태만 완료로 변경"""
+        self.btn_save.setText("✅ 저장 완료")
+        self.btn_save.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 13pt; border-radius: 8px;")
         
-        # 2. [추가] 최신 입력 데이터를 다시 한번 수집
-        data = self.update_and_get_data()
-        
-        # 3. [핵심] main.py의 execute_save_logic을 실행하라고 신호를 보냄!
-        self.save_requested.emit(data) 
-        
-        # 4. 이제 창을 닫습니다.
-        self.accept()
+        # 이미 이동된 파일을 또 저장하지 못하도록 버튼을 비활성화 (창 닫기 버튼만 누를 수 있게 함)
+        self.btn_save.setEnabled(False)
