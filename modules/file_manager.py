@@ -1,6 +1,8 @@
 import os
 import shutil
 from typing import List, Dict
+from modules.messenger import parse_custom_indices
+
 import time
 
 class FileManager:
@@ -35,8 +37,6 @@ class FileManager:
         if "센서바디" in part_name:
             machine_parts = []
 
-            from modules.messenger import parse_custom_indices
-
             for i, r in enumerate(ranges):
                 target_pattern = r if isinstance(r, list) else [r]
                 target_indices = parse_custom_indices(target_pattern)
@@ -70,12 +70,21 @@ class FileManager:
             is_t = tool_changes[0] if tool_changes else False
             t_suffix = "T" if is_t else ""
             
+            target_indices = []
+            for r in ranges:
+                target_pattern = r if isinstance(r, list) else [r]
+                target_indices.extend(parse_custom_indices(target_pattern))
+            
             has_ng = False
-            for m in measurements:
+            for abs_idx in set(target_indices): # 중복 인덱스 방지
+                if abs_idx >= len(measurements): 
+                    continue
+                
+                m = measurements[abs_idx]
                 try:
                     if callable(m.is_ng):
                         if m.is_ng(): has_ng = True; break
-                    elif m.is_ng:
+                    elif getattr(m, 'is_ng', False):
                         has_ng = True; break
                 except: continue
                 

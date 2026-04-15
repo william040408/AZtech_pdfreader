@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
                 발생한 오류 내용(로그 창 내용 등)은 조원준 사원에게 공유해 주시면 신속히 조치하겠습니다.
             </p>
             
-            <p style="text-align: right; color: #7f8c8d;">v2.0 / Developer: Cho Won-joon</p>
+            <p style="text-align: right; color: #7f8c8d;">v2.5 / Developer: Cho Won-joon</p>
         </div>
         """
         QMessageBox.information(self, "도움말 및 주의사항", help_text)
